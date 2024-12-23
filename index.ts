@@ -707,10 +707,14 @@ Available Commands:
     }
   }
 }
+const HOST_KEY_PATH =
+  process.env.NODE_ENV === "production"
+    ? "/app/storage/host.key"
+    : "./host.key";
 
 const server = new SSH2.Server(
   {
-    hostKeys: [readFileSync("host.key")],
+    hostKeys: [readFileSync(HOST_KEY_PATH)],
   },
   async (client) => {
     console.log("New client connection established");
