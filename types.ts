@@ -3,7 +3,7 @@ export interface Message {
   content: string;
 }
 
-export interface Character {
+export interface Agent {
   id: string;
   name: string;
   system_prompt: string;
@@ -23,7 +23,7 @@ export interface ClientSession {
   username: string | null;
   credits: number;
   currentRoom: Room | null;
-  currentCharacter: Character | null;
+  currentAgent: Agent | null;
   stream: any;
 
   writeToStream(message: string, addPrompt?: boolean): void;
