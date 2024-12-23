@@ -1,7 +1,5 @@
 import postgres from "postgres";
 
-const sql = postgres({
-  database: process.env.DATABASE_URL,
-});
+const sql = postgres(process.env.DATABASE_URL!);
 
 export default sql;
