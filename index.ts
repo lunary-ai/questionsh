@@ -906,11 +906,6 @@ server.on("error", (err) => {
 server.on("listening", () => {
   const address = server.address();
   console.log("Server listening on:", address);
-  console.log({
-    address: address?.address,
-    port: address?.port,
-    family: address?.family,
-  });
 });
 
 server.listen(PORT);
