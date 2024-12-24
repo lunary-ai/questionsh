@@ -711,6 +711,8 @@ const HOST_KEY_PATH = "./host.key";
 // Modify the server startup code
 const PORT = process.env.PORT ?? 2222;
 
+console.log("Initializing server on port", PORT);
+
 const server = new SSH2.Server(
   {
     hostKeys: [readFileSync(HOST_KEY_PATH)],
@@ -721,7 +723,7 @@ const server = new SSH2.Server(
     },
   },
   async (client) => {
-    console.log("New client connection established");
+    console.log("Client connected");
 
     const sessionId = `session_${++sessionCounter}`;
     let autoLoginUsername: string | null = null;
