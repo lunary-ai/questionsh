@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 
 import { v4 as uuidv4 } from "uuid";
 import cron from "node-cron";
-// import sql from "./db";
+import sql from "./db";
 import {
   Message,
   ClientSession as IClientSession,
@@ -709,7 +709,7 @@ Available Commands:
 }
 const HOST_KEY_PATH = "./host.key";
 // Modify the server startup code
-const PORT = process.env.PORT ?? 2222;
+const PORT = Number(process.env.PORT ?? 2222);
 
 console.log("Initializing server on port", PORT);
 
@@ -723,159 +723,159 @@ const server = new SSH2.Server(
     },
   },
   async (client) => {
-    //     console.log("Client connected");
-    //     const sessionId = `session_${++sessionCounter}`;
-    //     let autoLoginUsername: string | null = null;
-    //     const handleStream = async (stream) => {
-    //       console.log(`Stream opened for session ${sessionId}`);
-    //       let autoLoginInfo: AutoLoginInfo | null = null;
-    //       if (autoLoginUsername) {
-    //         try {
-    //           const [userInfo] = await sql<[{ id: string; credits: number }]>`
-    //             SELECT id, credits FROM accounts
-    //             WHERE username = ${autoLoginUsername}
-    //           `;
-    //           if (userInfo) {
-    //             autoLoginInfo = {
-    //               username: autoLoginUsername,
-    //               userId: userInfo.id,
-    //               credits: userInfo.credits,
-    //             };
-    //           }
-    //         } catch (error) {
-    //           console.error("Error fetching user info for auto-login:", error);
-    //         }
-    //       }
-    //       const session = new ClientSession(sessionId, stream, autoLoginInfo);
-    //       sessions.set(sessionId, session);
-    //       // Welcome message with badass ASCII art
-    //       const welcomeMessage = `
-    // \x1b[35m
-    //                            __   _                         __
-    // ____ _ __  __ ___   _____ / /_ (_)____   ____      _____ / /_
-    // / __ \`// / / // _ \ / ___// __// // __ \ / __ \    / ___// __ \\
-    // / /_/ // /_/ //  __/(__  )/ /_ / // /_/ // / / /_  (__  )/ / / /
-    // \__, / \__,_/ \___//____/ \__//_/ \____//_/ /_/(_)/____//_/ /_/
-    // /_/
-    // \x1b[0m
-    // 🤖 Welcome to \x1b[1mquestion.sh\x1b[0m - Your AI-powered SSH interface!
-    // Create shared rooms and reusable agents.
-    // ${
-    //   autoLoginInfo
-    //     ? `\x1b[32mYou are logged in as ${autoLoginInfo.username}. You have ${autoLoginInfo.credits} credits.\x1b[0m`
-    //     : "You are not logged in. Use /register or /login to access all features."
-    // }
-    // Type your message and press Enter. Commands:
-    // - Type "exit" to quit
-    // - Type "/help" for available commands`;
-    //       session.writeCommandOutput(welcomeMessage);
-    //       // If auto-login was successful, notify the user
-    //       if (autoLoginUsername) {
-    //         session.writeCommandOutput(
-    //           `Automatically logged in as ${autoLoginUsername}.`
-    //         );
-    //       }
-    //       stream.on("data", async (data) => {
-    //         const input = data.toString();
-    //         // Handle backspace
-    //         if (input === "\x7f") {
-    //           if (session.buffer.length > 0) {
-    //             session.buffer = session.buffer.slice(0, -1);
-    //             stream.write("\b \b");
-    //           }
-    //           return;
-    //         }
-    //         // Handle enter key
-    //         if (input === "\r") {
-    //           stream.write("\n");
-    //           const trimmedBuffer = session.buffer.trim();
-    //           if (trimmedBuffer.toLowerCase() === "exit") {
-    //             stream.write("Goodbye! 👋\r\n");
-    //             sessions.delete(sessionId);
-    //             stream.end();
-    //             return;
-    //           }
-    //           if (trimmedBuffer) {
-    //             await session.handleMessage(trimmedBuffer);
-    //           } else {
-    //             // If the buffer is empty or only contains whitespace, just show the prompt
-    //             session.writeToStream("", true);
-    //           }
-    //           session.buffer = "";
-    //           return;
-    //         }
-    //         // Regular character input
-    //         session.buffer += input;
-    //         stream.write(input);
-    //       });
-    //       stream.on("error", (err) => {
-    //         console.error(`Stream error for session ${sessionId}:`, err);
-    //         sessions.delete(sessionId);
-    //       });
-    //       stream.on("close", () => {
-    //         console.log(`Stream closed for session ${sessionId}`);
-    //         sessions.delete(sessionId);
-    //       });
-    //     };
-    //     client.on("authentication", async (ctx) => {
-    //       if (ctx.method === "password" && ctx.username) {
-    //         try {
-    //           const result = await sql`
-    //             SELECT id, credits FROM accounts
-    //             WHERE username = ${ctx.username}
-    //           `;
-    //           if (result.length > 0) {
-    //             autoLoginUsername = ctx.username;
-    //             console.log(`Auto-login successful for user: ${ctx.username}`);
-    //           } else {
-    //             console.log(`Auto-login failed: User ${ctx.username} not found`);
-    //           }
-    //         } catch (error) {
-    //           console.error("Auto-login error:", error);
-    //         }
-    //       }
-    //       ctx.accept();
-    //     });
-    //     client.on("ready", () => {
-    //       console.log(`Client authenticated! (Session: ${sessionId})`);
-    //       client.on("session", (accept) => {
-    //         const session = accept();
-    //         session.on("pty", (accept) => accept());
-    //         session.on("shell", (accept) => {
-    //           const stream = accept();
-    //           handleStream(stream);
-    //           // If auto-login was successful, update the session
-    //           if (autoLoginUsername) {
-    //             const clientSession = sessions.get(sessionId);
-    //             if (clientSession) {
-    //               sql`
-    //                 SELECT id, credits FROM accounts
-    //                 WHERE username = ${autoLoginUsername}
-    //               `
-    //                 .then(([result]) => {
-    //                   clientSession.userId = result.id;
-    //                   clientSession.username = autoLoginUsername;
-    //                   clientSession.credits = result.credits;
-    //                 })
-    //                 .catch((error) => {
-    //                   console.error(
-    //                     "Error updating session after auto-login:",
-    //                     error
-    //                   );
-    //                 });
-    //             }
-    //           }
-    //         });
-    //       });
-    //     });
-    //     client.on("error", (err) => {
-    //       console.error("Client error:", err);
-    //       sessions.delete(sessionId);
-    //     });
-    //     client.on("close", () => {
-    //       console.log(`Client disconnected (Session: ${sessionId})`);
-    //       sessions.delete(sessionId);
-    //     });
+    console.log("Client connected");
+    const sessionId = `session_${++sessionCounter}`;
+    let autoLoginUsername: string | null = null;
+    const handleStream = async (stream) => {
+      console.log(`Stream opened for session ${sessionId}`);
+      let autoLoginInfo: AutoLoginInfo | null = null;
+      if (autoLoginUsername) {
+        try {
+          const [userInfo] = await sql<[{ id: string; credits: number }]>`
+                SELECT id, credits FROM accounts
+                WHERE username = ${autoLoginUsername}
+              `;
+          if (userInfo) {
+            autoLoginInfo = {
+              username: autoLoginUsername,
+              userId: userInfo.id,
+              credits: userInfo.credits,
+            };
+          }
+        } catch (error) {
+          console.error("Error fetching user info for auto-login:", error);
+        }
+      }
+      const session = new ClientSession(sessionId, stream, autoLoginInfo);
+      sessions.set(sessionId, session);
+      // Welcome message with badass ASCII art
+      const welcomeMessage = `
+    \x1b[35m
+                               __   _                         __
+    ____ _ __  __ ___   _____ / /_ (_)____   ____      _____ / /_
+    / __ \`// / / // _ \ / ___// __// // __ \ / __ \    / ___// __ \\
+    / /_/ // /_/ //  __/(__  )/ /_ / // /_/ // / / /_  (__  )/ / / /
+    \__, / \__,_/ \___//____/ \__//_/ \____//_/ /_/(_)/____//_/ /_/
+    /_/
+    \x1b[0m
+    🤖 Welcome to \x1b[1mquestion.sh\x1b[0m - Your AI-powered SSH interface!
+    Create shared rooms and reusable agents.
+    ${
+      autoLoginInfo
+        ? `\x1b[32mYou are logged in as ${autoLoginInfo.username}. You have ${autoLoginInfo.credits} credits.\x1b[0m`
+        : "You are not logged in. Use /register or /login to access all features."
+    }
+    Type your message and press Enter. Commands:
+    - Type "exit" to quit
+    - Type "/help" for available commands`;
+      session.writeCommandOutput(welcomeMessage);
+      // If auto-login was successful, notify the user
+      if (autoLoginUsername) {
+        session.writeCommandOutput(
+          `Automatically logged in as ${autoLoginUsername}.`
+        );
+      }
+      stream.on("data", async (data) => {
+        const input = data.toString();
+        // Handle backspace
+        if (input === "\x7f") {
+          if (session.buffer.length > 0) {
+            session.buffer = session.buffer.slice(0, -1);
+            stream.write("\b \b");
+          }
+          return;
+        }
+        // Handle enter key
+        if (input === "\r") {
+          stream.write("\n");
+          const trimmedBuffer = session.buffer.trim();
+          if (trimmedBuffer.toLowerCase() === "exit") {
+            stream.write("Goodbye! 👋\r\n");
+            sessions.delete(sessionId);
+            stream.end();
+            return;
+          }
+          if (trimmedBuffer) {
+            await session.handleMessage(trimmedBuffer);
+          } else {
+            // If the buffer is empty or only contains whitespace, just show the prompt
+            session.writeToStream("", true);
+          }
+          session.buffer = "";
+          return;
+        }
+        // Regular character input
+        session.buffer += input;
+        stream.write(input);
+      });
+      stream.on("error", (err) => {
+        console.error(`Stream error for session ${sessionId}:`, err);
+        sessions.delete(sessionId);
+      });
+      stream.on("close", () => {
+        console.log(`Stream closed for session ${sessionId}`);
+        sessions.delete(sessionId);
+      });
+    };
+    client.on("authentication", async (ctx) => {
+      if (ctx.method === "password" && ctx.username) {
+        try {
+          const result = await sql`
+                SELECT id, credits FROM accounts
+                WHERE username = ${ctx.username}
+              `;
+          if (result.length > 0) {
+            autoLoginUsername = ctx.username;
+            console.log(`Auto-login successful for user: ${ctx.username}`);
+          } else {
+            console.log(`Auto-login failed: User ${ctx.username} not found`);
+          }
+        } catch (error) {
+          console.error("Auto-login error:", error);
+        }
+      }
+      ctx.accept();
+    });
+    client.on("ready", () => {
+      console.log(`Client authenticated! (Session: ${sessionId})`);
+      client.on("session", (accept) => {
+        const session = accept();
+        session.on("pty", (accept) => accept());
+        session.on("shell", (accept) => {
+          const stream = accept();
+          handleStream(stream);
+          // If auto-login was successful, update the session
+          if (autoLoginUsername) {
+            const clientSession = sessions.get(sessionId);
+            if (clientSession) {
+              sql`
+                    SELECT id, credits FROM accounts
+                    WHERE username = ${autoLoginUsername}
+                  `
+                .then(([result]) => {
+                  clientSession.userId = result.id;
+                  clientSession.username = autoLoginUsername;
+                  clientSession.credits = result.credits;
+                })
+                .catch((error) => {
+                  console.error(
+                    "Error updating session after auto-login:",
+                    error
+                  );
+                });
+            }
+          }
+        });
+      });
+    });
+    client.on("error", (err) => {
+      console.error("Client error:", err);
+      sessions.delete(sessionId);
+    });
+    client.on("close", () => {
+      console.log(`Client disconnected (Session: ${sessionId})`);
+      sessions.delete(sessionId);
+    });
   }
 );
 
@@ -910,30 +910,30 @@ server.on("listening", () => {
 
 server.listen(PORT);
 
-// await testDatabaseConnection();
+await testDatabaseConnection();
 
-// process.on("SIGINT", () => {
-//   console.log("\nShutting down server...");
-//   server.close();
-//   process.exit(0);
-// });
+process.on("SIGINT", () => {
+  console.log("\nShutting down server...");
+  server.close();
+  process.exit(0);
+});
 
 // Replace the setInterval with a cron job
 // This will run the resetCredits function every day at midnight
-// cron.schedule("0 0 * * *", async () => {
-// console.log("Running daily credit reset");
-//   await resetCredits();
-// });
+cron.schedule("0 0 * * *", async () => {
+  console.log("Running daily credit reset");
+  await resetCredits();
+});
 
-// // Update the resetCredits function
-// async function resetCredits() {
-//   try {
-//     await sql`
-//       UPDATE accounts SET credits = 30 WHERE credits < 30;
-//       UPDATE accounts SET credits = 10 WHERE credits < 10 AND email IS NULL;
-//     `;
-//     console.log("Credits reset completed");
-//   } catch (error) {
-//     console.error("Error resetting credits:", error);
-//   }
-// }
+// Update the resetCredits function
+async function resetCredits() {
+  try {
+    await sql`
+      UPDATE accounts SET credits = 30 WHERE credits < 30;
+      UPDATE accounts SET credits = 10 WHERE credits < 10 AND email IS NULL;
+    `;
+    console.log("Credits reset completed");
+  } catch (error) {
+    console.error("Error resetting credits:", error);
+  }
+}
