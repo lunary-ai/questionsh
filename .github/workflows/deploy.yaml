@@ -1,0 +1,31 @@
+name: Deploy to question.sh
+
+on:
+  push:
+    branches:
+      - main # Adjust if necessary
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Deploy code to VPS
+        run: |
+          # Define server connection, user, and path to the app
+          SERVER_USER="root"
+          SERVER_HOST="question.sh"
+          APP_DIR="/opt/question-sh"
+
+          # SSH into the VPS, pull the latest code, and restart
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
+            cd $APP_DIR && git pull && /root/.bun/bin/bun install && systemctl restart question-sh
+          "
