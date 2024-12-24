@@ -915,10 +915,6 @@ async function testDatabaseConnection() {
   }
 }
 
-// Wrap the server startup in an async function
-
-await testDatabaseConnection();
-
 // Add error event listener before calling listen
 server.on("error", (err) => {
   console.error("Server error:", {
@@ -930,10 +926,12 @@ server.on("error", (err) => {
 
 server.on("listening", () => {
   const address = server.address();
-  console.log("Server listening event triggered", address);
+  console.log("Server listening on:", address);
 });
 
 server.listen(PORT);
+
+await testDatabaseConnection();
 
 process.on("SIGINT", () => {
   console.log("\nShutting down server...");
