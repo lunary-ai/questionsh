@@ -914,53 +914,24 @@ async function testDatabaseConnection() {
 }
 
 // Wrap the server startup in an async function
-async function startServer() {
-  await testDatabaseConnection();
 
-  return new Promise((resolve, reject) => {
-    console.log(`Attempting to bind to port ${PORT}...`);
+await testDatabaseConnection();
 
-    try {
-      // Add error event listener before calling listen
-      server.on("error", (err) => {
-        console.error("Server error:", {
-          code: err.code,
-          message: err.message,
-          stack: err.stack,
-        });
-        reject(err);
-      });
-
-      server.on("listening", () => {
-        const address = server.address();
-        console.log("Server listening event triggered", address);
-      });
-
-      console.log("Calling server.listen...");
-      server.listen(PORT, "0.0.0.0", () => {
-        const address = server.address();
-        console.log("Listen callback triggered");
-
-        if (!address) {
-          console.error("Server failed to bind to an address");
-          process.exit(1);
-        }
-
-        console.log(`SSH server running on port ${PORT}`);
-        console.log(`Full address info:`, address);
-        resolve(true);
-      });
-    } catch (error) {
-      console.error("Caught error during server start:", error);
-      reject(error);
-    }
+// Add error event listener before calling listen
+server.on("error", (err) => {
+  console.error("Server error:", {
+    code: err.code,
+    message: err.message,
+    stack: err.stack,
   });
-}
-// Call the startServer function
-startServer().catch((error) => {
-  console.error("Failed to start server:", error);
-  process.exit(1);
 });
+
+server.on("listening", () => {
+  const address = server.address();
+  console.log("Server listening event triggered", address);
+});
+
+server.listen(PORT);
 
 process.on("SIGINT", () => {
   console.log("\nShutting down server...");
