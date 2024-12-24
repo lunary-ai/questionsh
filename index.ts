@@ -927,34 +927,39 @@ server.on("error", (err) => {
 server.on("listening", () => {
   const address = server.address();
   console.log("Server listening on:", address);
+  console.log({
+    address: address?.address,
+    port: address?.port,
+    family: address?.family,
+  });
 });
 
 server.listen(PORT);
 
-await testDatabaseConnection();
+// await testDatabaseConnection();
 
-process.on("SIGINT", () => {
-  console.log("\nShutting down server...");
-  server.close();
-  process.exit(0);
-});
+// process.on("SIGINT", () => {
+//   console.log("\nShutting down server...");
+//   server.close();
+//   process.exit(0);
+// });
 
 // Replace the setInterval with a cron job
 // This will run the resetCredits function every day at midnight
-cron.schedule("0 0 * * *", async () => {
-  console.log("Running daily credit reset");
-  await resetCredits();
-});
+// cron.schedule("0 0 * * *", async () => {
+// console.log("Running daily credit reset");
+//   await resetCredits();
+// });
 
-// Update the resetCredits function
-async function resetCredits() {
-  try {
-    await sql`
-      UPDATE accounts SET credits = 30 WHERE credits < 30;
-      UPDATE accounts SET credits = 10 WHERE credits < 10 AND email IS NULL;
-    `;
-    console.log("Credits reset completed");
-  } catch (error) {
-    console.error("Error resetting credits:", error);
-  }
-}
+// // Update the resetCredits function
+// async function resetCredits() {
+//   try {
+//     await sql`
+//       UPDATE accounts SET credits = 30 WHERE credits < 30;
+//       UPDATE accounts SET credits = 10 WHERE credits < 10 AND email IS NULL;
+//     `;
+//     console.log("Credits reset completed");
+//   } catch (error) {
+//     console.error("Error resetting credits:", error);
+//   }
+// }
