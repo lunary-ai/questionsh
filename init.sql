@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 -- Create an index on the username column for faster lookups
 CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 
--- Create the agents table
-CREATE TABLE IF NOT EXISTS agents (
+-- Create the characters table
+CREATE TABLE IF NOT EXISTS characters (
     id UUID PRIMARY KEY,
     owner_id UUID NOT NULL REFERENCES accounts(id),
     name VARCHAR(255) NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 
 -- Create an index on the owner_id and name columns for faster lookups
-CREATE INDEX IF NOT EXISTS idx_agents_owner_name ON agents(owner_id, name);
+CREATE INDEX IF NOT EXISTS idx_characters_owner_name ON characters(owner_id, name);
 
 -- Create the rooms table
 CREATE TABLE IF NOT EXISTS rooms (
@@ -60,4 +60,4 @@ CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
 -- Grant necessary permissions (adjust as needed based on your setup)
--- GRANT ALL PRIVILEGES ON TABLE accounts, agents, rooms, room_members, messages TO your_database_user;
+-- GRANT ALL PRIVILEGES ON TABLE accounts, characters, rooms, room_members, messages TO your_database_user;
