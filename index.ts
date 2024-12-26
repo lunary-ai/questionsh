@@ -1,6 +1,6 @@
 import { createServer, createHttpServer } from "./server";
-import { testDatabaseConnection, resetCredits } from "./database";
-import cron from "node-cron";
+import { testDatabaseConnection } from "./database";
+
 import OpenAI from "openai";
 import { fetchAndCacheModelList } from "./clientSession";
 
@@ -19,11 +19,6 @@ export const openai = new OpenAI({
     "HTTP-Referer": "Question.sh", // Replace with your actual site URL
     "X-Title": "Question.sh", // Replace with your app name
   },
-});
-
-cron.schedule("0 0 * * *", async () => {
-  console.log("Running daily credit reset");
-  await resetCredits();
 });
 
 process.on("SIGINT", () => {

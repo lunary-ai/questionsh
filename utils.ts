@@ -59,9 +59,6 @@ Available Commands:
              /retry 0.8
   /register - Register a new account
   /login    - Login to an existing account
-  /join <room_name>    - Join a room (requires login)
-  /leave               - Leave the current room (requires login)
-  /rooms               - List all available rooms (requires login)
   /char               - Manage characters (use /char for subcommands)
   /adventure          - Start a text-based RPG adventure
   /model              - List available models or select a model:

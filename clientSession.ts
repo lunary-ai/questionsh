@@ -183,12 +183,6 @@ export class ClientSession implements IClientSession {
         await this.handleInteractiveAuth("login");
         return true;
 
-      case "/join":
-      case "/leave":
-      case "/rooms":
-        this.writeCommandOutput("Room functionality is currently disabled.");
-        return true;
-
       case "/char":
         if (!this.userId) {
           this.writeCommandOutput(

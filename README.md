@@ -59,7 +59,6 @@ bun run index.ts
 2. Once connected, you can:
    - Use `/help` to see available commands
    - Start conversations with the AI
-   - Join rooms using `/join roomname`
    - Select models using `/model modelname`
 
 ## Development and Contribution
@@ -73,7 +72,6 @@ bun run index.ts
 
 - `index.ts`: Main entry point, sets up the SSH server
 - `clientSession.ts`: Manages individual client sessions and interactions
-- `room.ts`: Implements room-based chat functionality
 - `database.ts`: Handles database operations
 - `types.ts`: Contains TypeScript type definitions
 - `utils.ts`: Utility functions

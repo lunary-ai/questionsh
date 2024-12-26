@@ -16,16 +16,4 @@ export async function testDatabaseConnection() {
   }
 }
 
-export async function resetCredits() {
-  try {
-    await sql`
-      UPDATE accounts SET credits = 30 WHERE credits < 30;
-      UPDATE accounts SET credits = 10 WHERE credits < 10 AND email IS NULL;
-    `;
-    console.log("Credits reset completed");
-  } catch (error) {
-    console.error("Error resetting credits:", error);
-  }
-}
-
 export { sql };

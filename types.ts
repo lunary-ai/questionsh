@@ -34,21 +34,6 @@ export interface ClientSession {
   streamResponse(userMessage: string): Promise<void>;
 }
 
-export interface Room {
-  id: string;
-  name: string;
-  members: Set<ClientSession>;
-  addMember(session: ClientSession): void;
-  removeMember(session: ClientSession): void;
-  addMessage(
-    content: string,
-    userId: string | null,
-    isSystemMessage?: boolean
-  ): Promise<void>;
-  broadcast(message: string, sender: ClientSession): Promise<void>;
-  getRecentMessages(limit?: number): Promise<any[]>;
-}
-
 export interface Character {
   id: string;
   name: string;
