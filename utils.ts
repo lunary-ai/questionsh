@@ -62,5 +62,8 @@ Available Commands:
   /rooms               - List all available rooms (requires login)
   /char               - Manage characters (use /char for subcommands)
   /adventure          - Start a text-based RPG adventure
+  /model              - List available models or select a model:
+                        /model (list models)
+                        /model <model_name> (select a model)
   exit     - Exit the session`;
 }

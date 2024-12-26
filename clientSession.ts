@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from "uuid";
-import Anthropic from "@anthropic-ai/sdk";
 import { sql } from "./database";
 import {
   ClientSession as IClientSession,
@@ -18,10 +17,7 @@ import { generateHelpMessage } from "./utils";
 import { Stream } from "ssh2";
 import bcrypt from "bcrypt";
 import { guestCredits } from "./server";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+import { openai } from "./index";
 
 export class ClientSession implements IClientSession {
   id: string;
@@ -30,7 +26,7 @@ export class ClientSession implements IClientSession {
   requestCount = 0;
   conversation: Message[] = [];
   startTime = Date.now();
-  model = "claude-3-5-sonnet-20240620";
+  model = "google/gemini-2.0-flash-thinking-exp:free";
   systemPrompt =
     "You are a helpful AI assistant accessed through a SSH service called question.sh. Keep responses concise and use simple formatting.";
   temperature = 1.0;
@@ -43,6 +39,10 @@ export class ClientSession implements IClientSession {
   isInAdventure: boolean = false;
   adventureConversation: Message[] = [];
   clientIP: string;
+  public inputHandler: ((data: Buffer) => void) | null = null;
+  cursorPos: number = 0;
+  clientPublicKey: string | null = null;
+  private inputBuffer: string = "";
 
   constructor(
     id: string,
@@ -59,9 +59,11 @@ export class ClientSession implements IClientSession {
       this.userId = autoLoginInfo.userId;
       this.credits = autoLoginInfo.credits;
       console.log(`Auto-logged in user: ${autoLoginInfo.username}`);
+      this.loadSelectedModel();
     }
 
     this.clientIP = clientIP;
+    this.setInputHandler();
   }
 
   writeToStream(message: string, addPrompt: boolean = true) {
@@ -69,17 +71,21 @@ export class ClientSession implements IClientSession {
     if (addPrompt) {
       const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
       this.stream.write(`\r\n\x1b[36m${roomName}>\x1b[0m `);
+      this.cursorPos = 0;
     }
   }
 
-  writeCommandOutput(message: string) {
+  writeCommandOutput(message: string, addPrompt: boolean = true) {
     const trimmedMessage = message.trim().replace(/\n/g, "\r\n");
     const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
-    this.stream.write("\r\n" + trimmedMessage + "\r\n");
-    this.stream.write(`\x1b[36m${roomName}>\x1b[0m `);
+    this.stream.write("\r\n" + trimmedMessage);
+    if (addPrompt) {
+      this.stream.write("\r\n");
+      this.stream.write(`\x1b[36m${roomName}>\x1b[0m `);
+    }
   }
 
-  async handleCommand(cmd: string) {
+  async handleCommand(cmd: string): Promise<boolean> {
     const [command, ...args] = cmd.trim().toLowerCase().split(" ");
     console.log(`Command received: ${command}`);
 
@@ -154,78 +160,19 @@ export class ClientSession implements IClientSession {
         return true;
 
       case "/register":
-        if (args.length !== 2) {
-          this.writeCommandOutput("Usage: /register <username> <password>");
+        if (args.length > 0) {
+          this.writeCommandOutput("Usage: /register");
           return true;
         }
-        const [username, password] = args;
-        try {
-          const [existingUser] = await sql`
-            SELECT id FROM accounts WHERE username = ${username}
-          `;
-          if (existingUser) {
-            console.log(
-              `Registration failed: Username "${username}" already exists`
-            );
-            this.writeCommandOutput(`Username "${username}" is already taken.`);
-            return true;
-          }
-
-          const password_hash = await bcrypt.hash(password, 10);
-          const result = await sql`
-            INSERT INTO accounts (id, username, credits, password_hash)
-            VALUES (${uuidv4()}, ${username}, 30, ${password_hash})
-            RETURNING id, credits
-          `;
-          this.userId = result[0].id;
-          this.username = username;
-          this.credits = result[0].credits;
-          console.log(`User registered: ${username} (ID: ${this.userId})`);
-          this.writeCommandOutput(
-            `Registered successfully. Welcome, ${username}! You have ${this.credits} credits.`
-          );
-        } catch (error) {
-          console.error("Registration error:", error);
-          this.writeCommandOutput(
-            `Registration failed. Error: ${(error as Error).message}`
-          );
-        }
+        await this.handleInteractiveAuth("register");
         return true;
 
       case "/login":
-        if (args.length !== 2) {
-          this.writeCommandOutput("Usage: /login <username> <password>");
+        if (args.length > 0) {
+          this.writeCommandOutput("Usage: /login");
           return true;
         }
-        const [loginUsername, loginPassword] = args;
-        try {
-          const [user] = await sql`
-            SELECT id, credits, password_hash FROM accounts
-            WHERE username = ${loginUsername}
-          `;
-          if (!user) {
-            this.writeCommandOutput(`No account found with this username.`);
-            return true;
-          }
-
-          const passwordMatch = await bcrypt.compare(
-            loginPassword,
-            user.password_hash
-          );
-          if (!passwordMatch) {
-            this.writeCommandOutput(`Invalid password.`);
-            return true;
-          }
-
-          this.userId = user.id;
-          this.username = loginUsername;
-          this.credits = user.credits;
-          this.writeCommandOutput(
-            `Logged in successfully. Welcome back, ${loginUsername}! You have ${this.credits} credits.`
-          );
-        } catch (error) {
-          this.writeCommandOutput(`Login failed. Please try again.`);
-        }
+        await this.handleInteractiveAuth("login");
         return true;
 
       case "/join": {
@@ -499,139 +446,106 @@ export class ClientSession implements IClientSession {
         this.writeCommandOutput(helpMessage);
         return true;
 
+      case "/model":
+        if (args.length === 0) {
+          await this.listModels();
+        } else {
+          const modelName = args.join(" ");
+          await this.selectModel(modelName);
+        }
+        return true;
+
       default:
         return false;
     }
   }
 
-  async streamResponse(message: string) {
+  async streamResponse(userMessage: string): Promise<void> {
+    if (this.credits <= 0) {
+      this.writeCommandOutput(
+        "You have run out of credits. Please contact the administrator."
+      );
+      return;
+    }
+
+    this.credits--;
+    if (this.username && this.username !== "guest") {
+      await sql`
+        UPDATE accounts
+        SET credits = credits - 1
+        WHERE username = ${this.username}
+      `;
+    } else {
+      guestCredits.set(this.clientIP, this.credits);
+    }
+
     try {
-      if (this.credits <= 0) {
-        this.writeCommandOutput(
-          "You've run out of credits. Please register or login to continue."
-        );
-        return false;
-      }
-
-      this.credits--;
-      if (this.userId) {
-        await sql`UPDATE accounts SET credits = credits - 1 WHERE id = ${this.userId}`;
-      } else {
-        const currentCredits = guestCredits.get(this.clientIP) || 0;
-        guestCredits.set(this.clientIP, currentCredits - 1);
-      }
-
-      this.conversation.push({
-        role: "user",
-        content: message,
+      const stream = await openai.chat.completions.create({
+        model:
+          this.model === "anthropic/claude-3.5-sonnet"
+            ? "anthropic/claude-3.5-sonnet"
+            : this.model,
+        messages: [
+          { role: "system", content: this.systemPrompt },
+          ...this.conversation.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          { role: "user", content: userMessage },
+        ],
+        stream: true,
       });
 
-      let character = this.currentCharacter;
-      if (!character && message.includes("@")) {
-        const mentionedCharacterName = message.match(/@(\w+)/)?.[1];
-        if (mentionedCharacterName) {
-          const [mentionedCharacter] = await sql<Character[]>`
-            SELECT id, name, system_prompt
-            FROM characters
-            WHERE owner_id = ${this.userId} AND name = ${mentionedCharacterName}
-          `;
-          if (mentionedCharacter) {
-            character = mentionedCharacter;
-            message = message.replace(`@${mentionedCharacterName}`, "").trim();
-          }
-        }
-      }
-
-      console.log(`Streaming response for user ${this.username || this.id}`);
       let fullResponse = "";
-      const messageStream = await anthropic.messages.stream({
-        model: this.model,
-        max_tokens: 1024,
-        temperature: this.temperature,
-        messages: this.conversation,
-        system: character ? character.system_prompt : this.systemPrompt,
-      });
+      let isFirstChunk = true;
 
-      this.writeToStream("\r\n", false); // Start the response on a new line
+      // Move the cursor to the beginning of the line and clear it
+      this.writeToStream("\r\x1b[K", false);
 
-      for await (const chunk of messageStream) {
-        if (chunk.type === "content_block_delta") {
-          const text = chunk.delta.text;
-          fullResponse += text;
-          this.writeToStream(
-            "\x1b[33m" + text.replace(/\n/g, "\r\n") + "\x1b[0m",
-            false
-          );
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        fullResponse += content;
+
+        if (isFirstChunk) {
+          // For the first chunk, ensure we start on a new line
+          this.writeToStream("\n", false);
+          isFirstChunk = false;
         }
+
+        this.writeToStream(content, false);
       }
 
+      this.writeToStream("\n");
+      this.conversation.push({ role: "user", content: userMessage });
       this.conversation.push({
         role: "assistant",
-        content: fullResponse,
+        content: fullResponse.trim(),
       });
-
-      this.writeToStream("\r\n", false); // Add a newline after the response
-      this.writeToStream("", true); // Display the prompt
-      console.log(`Response completed for user ${this.username || this.id}`);
-      return true;
     } catch (error) {
-      console.error(
-        `Error in streamResponse for user ${this.username || this.id}:`,
-        error
-      );
+      console.error("Error querying model:", error);
       this.writeCommandOutput(
-        `\x1b[31mError: ${(error as Error).message}\x1b[0m`
+        "An error occurred while processing your query. Please try again."
       );
-      return false;
     }
   }
 
-  async handleMessage(message: string) {
-    const trimmedMessage = message.trim();
-
-    if (!trimmedMessage) {
-      this.writeToStream("> ");
+  async handleMessage(message: string): Promise<void> {
+    if (message.trim().toLowerCase() === "exit") {
+      this.terminateSession();
       return;
     }
 
-    const now = Date.now();
-    if (now - this.lastRequest < 3000 && this.lastRequest !== 0) {
-      this.writeCommandOutput(
-        "Please wait a few seconds before sending another message."
-      );
+    if (this.isInAdventure) {
+      await handleAdventureMessage(this, message);
       return;
     }
 
-    // Check if it's a command
-    if (trimmedMessage.startsWith("/")) {
-      const handled = await this.handleCommand(trimmedMessage);
+    if (message.startsWith("/")) {
+      const handled = await this.handleCommand(message);
       if (handled) return;
     }
 
-    // If in adventure mode, handle adventure messages
-    if (this.isInAdventure) {
-      if (trimmedMessage.toLowerCase() === "exit") {
-        this.isInAdventure = false;
-        this.writeCommandOutput("You have exited the adventure mode.");
-        this.writeToStream("> ");
-      } else {
-        await handleAdventureMessage(this, trimmedMessage);
-      }
-      return;
-    }
-
-    // If in a room, broadcast the message
-    if (this.currentRoom) {
-      await this.currentRoom.broadcast(trimmedMessage, this);
-      this.writeToStream("> ");
-      return;
-    }
-
-    const success = await this.streamResponse(trimmedMessage);
-    if (success) {
-      this.lastRequest = now;
-      this.requestCount++;
-    }
+    await this.streamResponse(message);
   }
 
   async leaveRoom() {
@@ -656,5 +570,279 @@ export class ClientSession implements IClientSession {
         console.error(`Failed to leave room: ${error.message}`);
       }
     }
+  }
+
+  private async handleInteractiveAuth(mode: "login" | "register") {
+    const stream = this.stream;
+
+    // Ask for username without prompt
+    this.writeCommandOutput("Username:", false);
+    stream.write(" "); // Add a space after the colon
+
+    const username = await new Promise<string>((resolve) => {
+      let input = "";
+      const handler = (data: Buffer) => {
+        const char = data.toString();
+        if (char === "\r") {
+          stream.write("\n");
+          stream.removeListener("data", handler);
+          resolve(input.trim());
+        } else if (char === "\x7f") {
+          // Backspace
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+            stream.write("\b \b");
+          }
+        } else {
+          input += char;
+          stream.write(char);
+        }
+      };
+      this.inputHandler = handler;
+    });
+
+    // Ask for password without prompt
+    this.writeCommandOutput("Password:", false);
+    stream.write(" "); // Add a space after the colon
+
+    const password = await new Promise<string>((resolve) => {
+      let input = "";
+      const handler = (data: Buffer) => {
+        const char = data.toString();
+        if (char === "\r") {
+          stream.write("\n");
+          stream.removeListener("data", handler);
+          resolve(input.trim());
+        } else if (char === "\x7f") {
+          // Backspace
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+          }
+        } else {
+          input += char;
+          stream.write("*");
+        }
+      };
+      this.inputHandler = handler;
+    });
+
+    this.inputHandler = null; // Clear the handler when done
+
+    // Handle the auth based on mode
+    if (mode === "register") {
+      try {
+        const [existingUser] = await sql`
+          SELECT id FROM accounts WHERE username = ${username}
+        `;
+        if (existingUser) {
+          this.writeCommandOutput(`Username "${username}" is already taken.`);
+          return;
+        }
+
+        const password_hash = await bcrypt.hash(password, 10);
+        const result = await sql`
+          INSERT INTO accounts (id, username, credits, password_hash)
+          VALUES (${uuidv4()}, ${username}, 30, ${password_hash})
+          RETURNING id, credits
+        `;
+        this.userId = result[0].id;
+        this.username = username;
+        this.credits = result[0].credits;
+        this.writeCommandOutput(
+          `Registered successfully. Welcome, ${username}! You have ${this.credits} credits.`
+        );
+      } catch (error) {
+        console.error("Registration error:", error);
+        this.writeCommandOutput(
+          `Registration failed. Error: ${(error as Error).message}`
+        );
+      }
+    } else {
+      try {
+        const [user] = await sql`
+          SELECT id, credits, password_hash FROM accounts
+          WHERE username = ${username}
+        `;
+        if (!user) {
+          this.writeCommandOutput(`No account found with this username.`);
+          return;
+        }
+
+        const passwordMatch = await bcrypt.compare(
+          password,
+          user.password_hash
+        );
+        if (!passwordMatch) {
+          this.writeCommandOutput(`Invalid password.`);
+          return;
+        }
+
+        this.userId = user.id;
+        this.username = username;
+        this.credits = user.credits;
+        this.writeCommandOutput(
+          `Logged in successfully. Welcome back, ${username}! You have ${this.credits} credits.`
+        );
+      } catch (error) {
+        this.writeCommandOutput(`Login failed. Please try again.`);
+      }
+    }
+  }
+
+  async loadSelectedModel() {
+    if (this.username && this.username !== "guest") {
+      try {
+        const [userInfo] = await sql<[{ selected_model: string }]>`
+          SELECT selected_model FROM accounts
+          WHERE username = ${this.username}
+        `;
+        if (userInfo && userInfo.selected_model) {
+          this.model = userInfo.selected_model;
+        }
+      } catch (error) {
+        console.error("Error loading selected model:", error);
+      }
+    }
+  }
+
+  async listModels() {
+    try {
+      const response = await openai.models.list();
+      const sortedModels = response.data.sort((a, b) => b.created - a.created);
+      const topModels = sortedModels.slice(0, 30);
+      const modelList = topModels
+        .map((model) => {
+          const isSelected = model.id === this.model;
+          return isSelected
+            ? `\x1b[1m\x1b[35m${model.id} (current)\x1b[0m`
+            : model.id;
+        })
+        .join("\n");
+      this.writeCommandOutput(`Available models (top 30):\n${modelList}`);
+    } catch (error) {
+      console.error("Error listing models:", error);
+      this.writeCommandOutput("Error listing models. Please try again later.");
+    }
+  }
+
+  async selectModel(modelId: string) {
+    try {
+      this.model = modelId;
+      if (this.username && this.username !== "guest") {
+        await sql`
+          UPDATE accounts
+          SET selected_model = ${modelId}
+          WHERE username = ${this.username}
+        `;
+      }
+      this.writeCommandOutput(`Model selected: ${modelId}`);
+    } catch (error) {
+      console.error("Error selecting model:", error);
+      this.writeCommandOutput("Error selecting model. Please try again.");
+    }
+  }
+
+  public setInputHandler(): void {
+    this.inputHandler = (data: Buffer) => {
+      const input = data.toString();
+
+      // Handle Ctrl+C
+      if (input === "\x03") {
+        this.terminateSession();
+        return;
+      }
+
+      // Handle arrow keys
+      if (input === "\x1b[C") {
+        // Right arrow
+        if (this.cursorPos < this.inputBuffer.length) {
+          this.cursorPos++;
+          this.redrawInputLine();
+        }
+        return;
+      }
+      if (input === "\x1b[D") {
+        // Left arrow
+        if (this.cursorPos > 0) {
+          this.cursorPos--;
+          this.redrawInputLine();
+        }
+        return;
+      }
+
+      // Ignore other escape sequences
+      if (input.startsWith("\x1b")) {
+        return;
+      }
+
+      // Handle regular input
+      if (input === "\r") {
+        // Enter key pressed
+        this.stream.write("\r\n");
+        const command = this.inputBuffer.trim();
+        this.inputBuffer = "";
+        this.cursorPos = 0;
+        this.handleMessage(command);
+      } else if (input === "\x7f") {
+        // Backspace
+        if (this.cursorPos > 0) {
+          this.inputBuffer =
+            this.inputBuffer.slice(0, this.cursorPos - 1) +
+            this.inputBuffer.slice(this.cursorPos);
+          this.cursorPos--;
+          this.redrawInputLine();
+        }
+      } else {
+        // Regular character input
+        this.inputBuffer =
+          this.inputBuffer.slice(0, this.cursorPos) +
+          input +
+          this.inputBuffer.slice(this.cursorPos);
+        this.cursorPos += input.length;
+        this.redrawInputLine();
+      }
+    };
+  }
+
+  private redrawInputLine(): void {
+    const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
+    const prompt = `\r\x1b[36m${roomName}>\x1b[0m `;
+    const inputLine = this.inputBuffer;
+
+    // Clear the current line and move cursor to the beginning
+    this.stream.write("\r\x1b[K");
+
+    // Write the prompt and input buffer
+    this.stream.write(prompt + inputLine);
+
+    // Move the cursor to the correct position
+    const cursorOffset = inputLine.length - this.cursorPos;
+    if (cursorOffset > 0) {
+      this.stream.write(`\x1b[${cursorOffset}D`);
+    }
+  }
+
+  private handlePastedContent(data: Buffer): void {
+    const pastedContent = data.toString().trim();
+    this.inputBuffer =
+      this.inputBuffer.slice(0, this.cursorPos) +
+      pastedContent +
+      this.inputBuffer.slice(this.cursorPos);
+    this.cursorPos += pastedContent.length;
+    this.redrawInputLine();
+  }
+
+  private terminateSession(): void {
+    this.writeCommandOutput("\r\nSession terminated. Goodbye!");
+    this.stream.end();
+    this.cleanup();
+  }
+
+  private cleanup(): void {
+    if (this.currentRoom) {
+      this.leaveRoom();
+    }
+    this.stream.removeAllListeners();
+    // Add any other necessary cleanup tasks here
   }
 }

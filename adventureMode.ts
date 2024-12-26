@@ -1,12 +1,11 @@
 import { readFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
-import Anthropic from "@anthropic-ai/sdk";
+import { openai } from "./index";
 import { sql } from "./database";
 import { ClientSession, Message } from "./types";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const ADVENTURE_MODEL = "anthropic/claude-3.5-sonnet";
+const ADVENTURE_SYSTEM_PROMPT = readFileSync("game_prompt.txt", "utf-8");
 
 export async function handleAdventure(session: ClientSession, input: string) {
   if (!session.userId) {
@@ -49,35 +48,32 @@ export async function handleAdventureMessage(
       content: message,
     });
 
-    const gamePrompt = readFileSync("game_prompt.txt", "utf-8");
-
-    console.log(
-      `Processing adventure turn for user ${session.username || session.id}`
-    );
-    let fullResponse = "";
-    const messageStream = await anthropic.messages.stream({
-      model: session.model,
-      max_tokens: 1024,
-      temperature: 0.8,
-      messages: session.adventureConversation,
-      system: gamePrompt,
+    const stream = await openai.chat.completions.create({
+      model: ADVENTURE_MODEL,
+      messages: [
+        { role: "system", content: ADVENTURE_SYSTEM_PROMPT },
+        ...session.adventureConversation.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        { role: "user", content: message },
+      ],
+      stream: true,
     });
 
-    session.writeToStream("\r\n", false);
+    let fullResponse = "";
 
-    for await (const chunk of messageStream) {
-      if (chunk.type === "content_block_delta") {
-        const text = chunk.delta.text;
-        fullResponse += text;
-        // Remove color codes and other special characters
-        const cleanText = text.replace(/\x1b\[[0-9;]*m/g, "");
-        session.writeToStream(cleanText.replace(/\n/g, "\r\n"), false);
-      }
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      fullResponse += content;
+      session.writeToStream(content, false);
     }
 
+    session.writeToStream("\n");
+    session.adventureConversation.push({ role: "user", content: message });
     session.adventureConversation.push({
       role: "assistant",
-      content: fullResponse,
+      content: fullResponse.trim(),
     });
 
     // Save game progress every 5 turns
@@ -91,14 +87,9 @@ export async function handleAdventureMessage(
       `Adventure turn completed for user ${session.username || session.id}`
     );
   } catch (error) {
-    console.error(
-      `Error in handleAdventureMessage for user ${
-        session.username || session.id
-      }:`,
-      error
-    );
+    console.error("Error in adventure mode:", error);
     session.writeCommandOutput(
-      `\x1b[31mError: ${(error as Error).message}\x1b[0m`
+      "An error occurred during the adventure. Please try again."
     );
   }
 }

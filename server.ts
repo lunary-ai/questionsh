@@ -4,6 +4,7 @@ import { loadHostKey, generateWelcomeMessage } from "./utils";
 import { sql } from "./database";
 import { AutoLoginInfo } from "./types";
 import http from "http";
+import { openai } from "./index";
 
 const HOST_KEY_PATH = "./host.key";
 const PORT = Number(process.env.PORT ?? 2222);
@@ -156,15 +157,69 @@ async function handleStream(
   }
 
   stream.on("data", async (data) => {
+    // Check if there's a custom input handler (for auth etc)
+    if (session.inputHandler) {
+      session.inputHandler(data);
+      return;
+    }
+
     const input = data.toString();
+
+    // Handle special key sequences
+    if (input.startsWith("\x1b")) {
+      // ESC sequence
+      if (input === "\x1b[A") {
+        // Up arrow
+        return;
+      }
+      if (input === "\x1b[B") {
+        // Down arrow
+        return;
+      }
+      if (input === "\x1b[C") {
+        // Right arrow
+        // Only move right if we're not at the end of the buffer
+        if (session.cursorPos < session.buffer.length) {
+          session.cursorPos++;
+          stream.write("\x1b[C");
+        }
+        return;
+      }
+      if (input === "\x1b[D") {
+        // Left arrow
+        // Only move left if we're not at the start
+        if (session.cursorPos > 0) {
+          session.cursorPos--;
+          stream.write("\x1b[D");
+        }
+        return;
+      }
+      return; // Ignore other escape sequences
+    }
+
     // Handle backspace
     if (input === "\x7f") {
-      if (session.buffer.length > 0) {
-        session.buffer = session.buffer.slice(0, -1);
-        stream.write("\b \b");
+      if (session.cursorPos > 0) {
+        // Remove character at cursor position
+        session.buffer =
+          session.buffer.slice(0, session.cursorPos - 1) +
+          session.buffer.slice(session.cursorPos);
+        session.cursorPos--;
+
+        // Move cursor back
+        stream.write("\b");
+
+        // Rewrite the rest of the line
+        stream.write(session.buffer.slice(session.cursorPos) + " ");
+
+        // Move cursor back to position
+        stream.write(
+          "\x1b[" + (session.buffer.length - session.cursorPos + 1) + "D"
+        );
       }
       return;
     }
+
     // Handle enter key
     if (input === "\r") {
       stream.write("\n");
@@ -178,15 +233,32 @@ async function handleStream(
       if (trimmedBuffer) {
         await session.handleMessage(trimmedBuffer);
       } else {
-        // If the buffer is empty or only contains whitespace, just show the prompt
         session.writeToStream("", true);
       }
       session.buffer = "";
+      session.cursorPos = 0;
       return;
     }
+
     // Regular character input
-    session.buffer += input;
-    stream.write(input);
+    if (input.length === 1 && input.charCodeAt(0) >= 32) {
+      // Insert character at cursor position
+      session.buffer =
+        session.buffer.slice(0, session.cursorPos) +
+        input +
+        session.buffer.slice(session.cursorPos);
+      session.cursorPos++;
+
+      // Write the new character and the rest of the line
+      stream.write(session.buffer.slice(session.cursorPos - 1));
+
+      // Move cursor back to position
+      if (session.cursorPos < session.buffer.length) {
+        stream.write(
+          "\x1b[" + (session.buffer.length - session.cursorPos) + "D"
+        );
+      }
+    }
   });
 
   stream.on("error", (err) => {
@@ -202,12 +274,15 @@ async function handleStream(
 
 export function createHttpServer() {
   const httpServer = http.createServer((req, res) => {
+    const activeConnections = sessions.size;
+
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>question.sh - Query LLMs from your terminal</title>
+        <title>question.sh</title>
+        <meta name="description" content="Query LLMs from your terminal">
         <style>
           body {
             background: #000;
@@ -216,12 +291,15 @@ export function createHttpServer() {
             white-space: pre-wrap;
             padding: 20px;
           }
+          .stats {
+            text-align:left;
+            margin-right: auto;
+            color: #0f0;
+            margin-top: 20px;
+          }
         </style>
       </head>
-      <body>
-<div style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
-<pre>
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+      <body><div style="display: flex; flex-direction: column; align-items: center; justify-content: center;"><pre>::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ::                                                          ::
 ::                                                          ::
@@ -238,10 +316,12 @@ export function createHttpServer() {
 
 Query LLMs from your terminal.
 
+<p class="stats">Open sessions: ${activeConnections}</p>
+
 Connect:
 
-$ ssh question.sh</pre></div></body></html>
-    `);
+> ssh question.sh</pre>
+</div></body></html>`);
   });
 
   httpServer.listen(HTTP_PORT, () => {

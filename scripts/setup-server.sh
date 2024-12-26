@@ -27,6 +27,16 @@ echo "Installing required packages (git, cron, openssh-server, postgresql)..."
 apt-get install -y git cron openssh-server unzip postgresql postgresql-contrib
 
 #######################################
+# 2. Install Caddy Server
+#######################################
+echo "Installing Caddy server..."
+apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt-get update
+apt-get install -y caddy
+
+#######################################
 # 2. Configure Main SSH Server on Port 2345
 #######################################
 echo "Configuring existing OpenSSH to run on port 2345 for admin use..."
@@ -81,6 +91,7 @@ cat <<EOF > .env
 DATABASE_URL=postgres://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME
 NODE_ENV=production
 PORT=22
+HTTP_PORT=3000
 EOF
 
 #######################################
@@ -125,11 +136,26 @@ systemctl enable question-sh
 systemctl start question-sh
 
 #######################################
-# 10. Open Firewall (UFW) for ports 22 & 2345
+# 10. Configure Caddy for HTTPS
+#######################################
+echo "Configuring Caddy for HTTPS..."
+cat <<EOF > /etc/caddy/Caddyfile
+question.sh {
+    reverse_proxy localhost:3000
+}
+EOF
+
+# Restart Caddy to apply changes
+systemctl restart caddy
+
+#######################################
+# 11. Open Firewall (UFW) for ports 22, 80, 443 & 2345
 #######################################
 if command -v ufw >/dev/null 2>&1; then
   echo "Configuring UFW..."
   ufw allow 22
+  ufw allow 80
+  ufw allow 443
   ufw allow 2345
   ufw --force enable
 else
@@ -137,15 +163,17 @@ else
 fi
 
 #######################################
-# 11. Final Status
+# 12. Final Status
 #######################################
 echo "
 Setup complete!
 Main SSH for admin is listening on port 2345.
 question.sh is now running on port 22.
+HTTP server is running on port 80.
 
 You should be able to connect publicly with:
   ssh question.sh
+  http://your-server-domain
   
 Admin access:
   ssh -p 2345 root@your-server-domain
