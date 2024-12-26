@@ -19,6 +19,21 @@ import bcrypt from "bcrypt";
 import { guestCredits } from "./server";
 import { openai } from "./index";
 
+// Add this new global variable
+let cachedModelList: string[] = [];
+
+// Add this new function to fetch and cache the model list
+export async function fetchAndCacheModelList() {
+  try {
+    const response = await openai.models.list();
+    const sortedModels = response.data.sort((a, b) => b.created - a.created);
+    cachedModelList = sortedModels.slice(0, 50).map((model) => model.id);
+    console.log("Model list cached successfully");
+  } catch (error) {
+    console.error("Error caching model list:", error);
+  }
+}
+
 export class ClientSession implements IClientSession {
   id: string;
   buffer = "";
@@ -707,18 +722,15 @@ export class ClientSession implements IClientSession {
 
   async listModels() {
     try {
-      const response = await openai.models.list();
-      const sortedModels = response.data.sort((a, b) => b.created - a.created);
-      const topModels = sortedModels.slice(0, 30);
-      const modelList = topModels
-        .map((model) => {
-          const isSelected = model.id === this.model;
+      const modelList = cachedModelList
+        .map((modelId) => {
+          const isSelected = modelId === this.model;
           return isSelected
-            ? `\x1b[1m\x1b[35m${model.id} (current)\x1b[0m`
-            : model.id;
+            ? `\x1b[1m\x1b[35m${modelId} (current)\x1b[0m`
+            : modelId;
         })
         .join("\n");
-      this.writeCommandOutput(`Available models (top 30):\n${modelList}`);
+      this.writeCommandOutput(`Available models:\n${modelList}`);
     } catch (error) {
       console.error("Error listing models:", error);
       this.writeCommandOutput("Error listing models. Please try again later.");

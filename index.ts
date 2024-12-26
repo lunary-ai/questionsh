@@ -2,6 +2,7 @@ import { createServer, createHttpServer } from "./server";
 import { testDatabaseConnection, resetCredits } from "./database";
 import cron from "node-cron";
 import OpenAI from "openai";
+import { fetchAndCacheModelList } from "./clientSession";
 
 console.log("Initializing question.sh server...");
 
@@ -31,3 +32,5 @@ process.on("SIGINT", () => {
   httpServer.close();
   process.exit(0);
 });
+
+fetchAndCacheModelList();
