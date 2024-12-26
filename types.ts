@@ -18,24 +18,20 @@ export interface ClientSession {
   userId: string | null;
   username: string | null;
   credits: number;
-  currentRoom: Room | null;
   stream: Stream;
   currentCharacter: Character | null;
   isInAdventure: boolean;
   adventureConversation: Message[];
-  writeToStream(message: string, addPrompt?: boolean): void;
-  writeCommandOutput(message: string): void;
-  handleCommand(cmd: string): Promise<boolean>;
-  streamResponse(message: string): Promise<void>;
-  handleMessage(message: string): Promise<void>;
-  leaveRoom(): Promise<void>;
-  clientPublicKey: string | null;
+  clientIP: string;
   inputHandler: ((data: Buffer) => void) | null;
   cursorPos: number;
-  clientIP: string;
-  loadSelectedModel(): Promise<void>;
-  listModels(): Promise<void>;
-  selectModel(modelId: string): Promise<void>;
+  clientPublicKey: string | null;
+
+  writeToStream(message: string, addPrompt?: boolean): void;
+  writeCommandOutput(message: string, addPrompt?: boolean): void;
+  handleCommand(cmd: string): Promise<boolean>;
+  handleMessage(message: string): Promise<void>;
+  streamResponse(userMessage: string): Promise<void>;
 }
 
 export interface Room {

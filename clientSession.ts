@@ -3,21 +3,15 @@ import { sql } from "./database";
 import {
   ClientSession as IClientSession,
   Message,
-  Room,
   Character,
   AutoLoginInfo,
 } from "./types";
-import { Room as RoomImpl } from "./room";
-import {
-  handleAdventure,
-  handleAdventureMessage,
-  saveGameProgress,
-} from "./adventureMode";
-import { generateHelpMessage } from "./utils";
 import { Stream } from "ssh2";
 import bcrypt from "bcrypt";
 import { guestCredits } from "./server";
 import { openai } from "./index";
+import { handleAdventure, handleAdventureMessage } from "./adventureMode";
+import { generateHelpMessage } from "./utils";
 
 // Add this new global variable
 let cachedModelList: any[] = [];
@@ -50,7 +44,6 @@ export class ClientSession implements IClientSession {
   userId: string | null = null;
   username: string | null = null;
   credits = 0.1; // Default credits for unlogged users (in USD)
-  currentRoom: Room | null = null;
   stream: Stream;
   currentCharacter: Character | null = null;
   isInAdventure: boolean = false;
@@ -86,19 +79,17 @@ export class ClientSession implements IClientSession {
   writeToStream(message: string, addPrompt: boolean = true) {
     this.stream.write(message.replace(/\n/g, "\r\n"));
     if (addPrompt) {
-      const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
-      this.stream.write(`\r\n\x1b[36m${roomName}>\x1b[0m `);
+      this.stream.write(`\r\n\x1b[36m>\x1b[0m `);
       this.cursorPos = 0;
     }
   }
 
   writeCommandOutput(message: string, addPrompt: boolean = true) {
     const trimmedMessage = message.trim().replace(/\n/g, "\r\n");
-    const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
     this.stream.write("\r\n" + trimmedMessage);
     if (addPrompt) {
       this.stream.write("\r\n");
-      this.stream.write(`\x1b[36m${roomName}>\x1b[0m `);
+      this.stream.write(`\x1b[36m>\x1b[0m `);
     }
   }
 
@@ -192,111 +183,10 @@ export class ClientSession implements IClientSession {
         await this.handleInteractiveAuth("login");
         return true;
 
-      case "/join": {
-        if (!this.userId) {
-          this.writeCommandOutput(
-            "You need to be logged in to join a room. Please use /register or /login first."
-          );
-          return true;
-        }
-        if (args.length < 1) {
-          this.writeCommandOutput("Usage: /join <room_name>");
-          return true;
-        }
-        const joinRoomName = args.join(" ");
-        try {
-          const [roomToJoin] = await sql`
-            SELECT id, name FROM rooms WHERE name = ${joinRoomName}
-          `;
-          if (!roomToJoin) {
-            this.writeCommandOutput(`Room "${joinRoomName}" not found.`);
-            return true;
-          }
-          if (this.currentRoom) {
-            await this.leaveRoom();
-          }
-          await sql`
-            INSERT INTO room_members (room_id, user_id)
-            VALUES (${roomToJoin.id}, ${this.userId})
-            ON CONFLICT (room_id, user_id) DO NOTHING
-          `;
-          this.currentRoom = new RoomImpl(roomToJoin.id, roomToJoin.name);
-          this.currentRoom.addMember(this);
-
-          // Fetch recent messages
-          const recentMessages = await this.currentRoom.getRecentMessages();
-          if (recentMessages.length > 0) {
-            this.writeCommandOutput("Recent messages:");
-            recentMessages.forEach((msg) => {
-              const sender = msg.is_system_message
-                ? "System"
-                : msg.username || "Anonymous";
-              this.writeCommandOutput(
-                `[${msg.created_at}] ${sender}: ${msg.content}`
-              );
-            });
-          }
-
-          this.writeCommandOutput(`Joined room "${roomToJoin.name}".`);
-          await this.currentRoom.addMessage(
-            `${this.username || this.id} has joined the room.`,
-            null,
-            true
-          );
-          this.currentRoom.broadcast(
-            `${this.username || this.id} has joined the room.`,
-            this
-          );
-        } catch (error) {
-          this.writeCommandOutput(`Failed to join room. ${error.message}`);
-        }
-        return true;
-      }
-
-      case "/leave": {
-        if (!this.userId) {
-          this.writeCommandOutput(
-            "You need to be logged in to leave a room. Please use /register or /login first."
-          );
-          return true;
-        }
-        if (!this.currentRoom) {
-          this.writeCommandOutput("You are not in any room.");
-          return true;
-        }
-        const leftRoomName = this.currentRoom.name;
-        await this.leaveRoom();
-        this.writeCommandOutput(`Left room "${leftRoomName}".`);
-        return true;
-      }
-
+      case "/join":
+      case "/leave":
       case "/rooms":
-        if (!this.userId) {
-          this.writeCommandOutput(
-            "You need to be logged in to list rooms. Please use /register or /login first."
-          );
-          return true;
-        }
-        try {
-          const dbRooms = await sql`
-            SELECT r.id, r.name, COUNT(rm.user_id) as member_count
-            FROM rooms r
-            LEFT JOIN room_members rm ON r.id = rm.room_id
-            GROUP BY r.id, r.name
-            ORDER BY r.name
-          `;
-          if (dbRooms.length === 0) {
-            this.writeCommandOutput("No rooms available.");
-          } else {
-            let roomList = "Available rooms:\r\n";
-            dbRooms.forEach((room) => {
-              roomList += `- ${room.name} (${room.member_count} members)\r\n`;
-            });
-            this.writeCommandOutput(roomList.trim());
-          }
-        } catch (error) {
-          this.writeCommandOutput(`Failed to list rooms. ${error.message}`);
-        }
+        this.writeCommandOutput("Room functionality is currently disabled.");
         return true;
 
       case "/char":
@@ -653,30 +543,6 @@ export class ClientSession implements IClientSession {
     await this.streamResponse(message);
   }
 
-  async leaveRoom() {
-    if (this.currentRoom && this.userId) {
-      try {
-        await sql`
-          DELETE FROM room_members
-          WHERE room_id = ${this.currentRoom.id} AND user_id = ${this.userId}
-        `;
-        this.currentRoom.removeMember(this);
-        await this.currentRoom.addMessage(
-          `${this.username || this.id} has left the room.`,
-          null,
-          true
-        );
-        this.currentRoom.broadcast(
-          `${this.username || this.id} has left the room.`,
-          this
-        );
-        this.currentRoom = null;
-      } catch (error) {
-        console.error(`Failed to leave room: ${error.message}`);
-      }
-    }
-  }
-
   private async handleInteractiveAuth(mode: "login" | "register") {
     const stream = this.stream;
 
@@ -914,8 +780,7 @@ export class ClientSession implements IClientSession {
   }
 
   private redrawInputLine(): void {
-    const roomName = this.currentRoom ? `${this.currentRoom.name} ` : "";
-    const prompt = `\r\x1b[36m${roomName}>\x1b[0m `;
+    const prompt = `\r\x1b[36m>\x1b[0m `;
     const inputLine = this.inputBuffer;
 
     // Clear the current line and move cursor to the beginning
@@ -948,9 +813,6 @@ export class ClientSession implements IClientSession {
   }
 
   private cleanup(): void {
-    if (this.currentRoom) {
-      this.leaveRoom();
-    }
     this.stream.removeAllListeners();
     // Add any other necessary cleanup tasks here
   }

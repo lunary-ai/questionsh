@@ -10,7 +10,7 @@ const ADVENTURE_SYSTEM_PROMPT = readFileSync("game_prompt.txt", "utf-8");
 export async function handleAdventure(session: ClientSession, input: string) {
   if (!session.userId) {
     session.writeCommandOutput(
-      "You need to be logged in to play the adventure game. Please use /login or /register first."
+      "You need to be logged in to play. Please use /login or /register first."
     );
     return;
   }
