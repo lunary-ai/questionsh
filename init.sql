@@ -1,9 +1,10 @@
 -- Create the accounts table
 CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
-    username VARCHAR(255) UNIQUE,
-    credits INTEGER NOT NULL DEFAULT 30,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    username VARCHAR(255) UNIQUE NOT NULL,
+    credits NUMERIC(10, 4) NOT NULL DEFAULT 0.3,
+    password_hash VARCHAR(255) NOT NULL,
+    selected_model VARCHAR(255)
 );
 
 -- Create an index on the username column for faster lookups
@@ -25,8 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_characters_owner_name ON characters(owner_id, nam
 -- Create the rooms table
 CREATE TABLE IF NOT EXISTS rooms (
     id UUID PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    name VARCHAR(255) UNIQUE NOT NULL
 );
 
 -- Create an index on the room name for faster lookups
@@ -34,9 +34,8 @@ CREATE INDEX IF NOT EXISTS idx_rooms_name ON rooms(name);
 
 -- Create the room_members table to handle the many-to-many relationship
 CREATE TABLE IF NOT EXISTS room_members (
-    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES accounts(id) ON DELETE CASCADE,
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    room_id UUID REFERENCES rooms(id),
+    user_id UUID REFERENCES accounts(id),
     PRIMARY KEY (room_id, user_id)
 );
 
@@ -47,8 +46,8 @@ CREATE INDEX IF NOT EXISTS idx_room_members_user_id ON room_members(user_id);
 -- Create the messages table
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY,
-    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    room_id UUID REFERENCES rooms(id),
+    user_id UUID REFERENCES accounts(id),
     content TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     is_system_message BOOLEAN DEFAULT FALSE

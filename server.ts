@@ -118,9 +118,9 @@ async function handleStream(
 
   if (!autoLoginUsername) {
     if (!guestCredits.has(clientIP)) {
-      guestCredits.set(clientIP, 10);
+      guestCredits.set(clientIP, 0.1);
     }
-    const credits = guestCredits.get(clientIP) || 0;
+    const credits = guestCredits.get(clientIP) || 0.1;
     autoLoginInfo = {
       username: "guest",
       userId: clientIP,

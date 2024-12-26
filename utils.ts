@@ -33,8 +33,10 @@ export function generateWelcomeMessage(
 
     ${
       autoLoginInfo
-        ? `\x1b[32mYou are logged in as ${autoLoginInfo.username}. You have ${autoLoginInfo.credits} credits.\x1b[0m`
-        : `\x1b[33mYou have 10 credits as a guest. Use /register or /login to get more credits.\x1b[0m`
+        ? `\x1b[32mYou are logged in as ${
+            autoLoginInfo.username
+          }. You have $${autoLoginInfo.credits.toFixed(4)} credits.\x1b[0m`
+        : `\x1b[33mYou have $0.1000 credits as a guest. Use /register or /login to get more credits.\x1b[0m`
     }
 
     Type your message and press Enter. Commands:
@@ -55,8 +57,8 @@ Available Commands:
   /clear   - Clear screen
   /retry   - Retry last message with optional temperature:
              /retry 0.8
-  /register <username> <password> - Register a new account
-  /login <username> <password>    - Login to an existing account
+  /register - Register a new account
+  /login    - Login to an existing account
   /join <room_name>    - Join a room (requires login)
   /leave               - Leave the current room (requires login)
   /rooms               - List all available rooms (requires login)
@@ -65,5 +67,6 @@ Available Commands:
   /model              - List available models or select a model:
                         /model (list models)
                         /model <model_name> (select a model)
+  /balance            - Check your current credit balance
   exit     - Exit the session`;
 }

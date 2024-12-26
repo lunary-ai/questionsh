@@ -20,19 +20,21 @@ import { guestCredits } from "./server";
 import { openai } from "./index";
 
 // Add this new global variable
-let cachedModelList: string[] = [];
+let cachedModelList: any[] = [];
 
 // Add this new function to fetch and cache the model list
 export async function fetchAndCacheModelList() {
   try {
     const response = await openai.models.list();
-    const sortedModels = response.data.sort((a, b) => b.created - a.created);
-    cachedModelList = sortedModels.slice(0, 50).map((model) => model.id);
+    cachedModelList = response.data;
     console.log("Model list cached successfully");
   } catch (error) {
     console.error("Error caching model list:", error);
   }
 }
+
+// Add a constant for the profit rate
+const PROFIT_RATE = 1.5; // 50% profit
 
 export class ClientSession implements IClientSession {
   id: string;
@@ -47,7 +49,7 @@ export class ClientSession implements IClientSession {
   temperature = 1.0;
   userId: string | null = null;
   username: string | null = null;
-  credits = 10;
+  credits = 0.1; // Default credits for unlogged users (in USD)
   currentRoom: Room | null = null;
   stream: Stream;
   currentCharacter: Character | null = null;
@@ -470,6 +472,12 @@ export class ClientSession implements IClientSession {
         }
         return true;
 
+      case "/balance":
+        this.writeCommandOutput(
+          `Your current balance is $${this.credits.toFixed(4)} credits.`
+        );
+        return true;
+
       default:
         return false;
     }
@@ -478,23 +486,15 @@ export class ClientSession implements IClientSession {
   async streamResponse(userMessage: string): Promise<void> {
     if (this.credits <= 0) {
       this.writeCommandOutput(
-        "You have run out of credits. Please contact the administrator."
+        "You have run out of credits. Please add more credits to continue."
       );
       return;
     }
 
-    this.credits--;
-    if (this.username && this.username !== "guest") {
-      await sql`
-        UPDATE accounts
-        SET credits = credits - 1
-        WHERE username = ${this.username}
-      `;
-    } else {
-      guestCredits.set(this.clientIP, this.credits);
-    }
-
     try {
+      console.log(
+        `[${this.id}] Starting stream response for model: ${this.model}`
+      );
       const stream = await openai.chat.completions.create({
         model:
           this.model === "anthropic/claude-3.5-sonnet"
@@ -513,21 +513,37 @@ export class ClientSession implements IClientSession {
 
       let fullResponse = "";
       let isFirstChunk = true;
+      let usage: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+      } | null = null;
 
       // Move the cursor to the beginning of the line and clear it
       this.writeToStream("\r\x1b[K", false);
 
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        fullResponse += content;
+        if (chunk.choices[0]?.delta?.content) {
+          const content = chunk.choices[0].delta.content;
+          fullResponse += content;
 
-        if (isFirstChunk) {
-          // For the first chunk, ensure we start on a new line
-          this.writeToStream("\n", false);
-          isFirstChunk = false;
+          if (isFirstChunk) {
+            // For the first chunk, ensure we start on a new line
+            this.writeToStream("\n", false);
+            isFirstChunk = false;
+          }
+
+          this.writeToStream(content, false);
         }
 
-        this.writeToStream(content, false);
+        // Check if this is the last chunk with usage information
+        if (chunk.usage) {
+          usage = chunk.usage;
+          console.log(
+            `[${this.id}] Received usage data:`,
+            JSON.stringify(usage)
+          );
+        }
       }
 
       this.writeToStream("\n");
@@ -536,11 +552,85 @@ export class ClientSession implements IClientSession {
         role: "assistant",
         content: fullResponse.trim(),
       });
+
+      if (usage) {
+        // Calculate the cost of the request using the accurate usage data
+        const cost = this.calculateRequestCost(usage);
+        this.credits -= cost;
+
+        // Update credits in the database or guest credits map
+        await this.updateCredits();
+
+        // console.log(
+        //   `[${this.id}] Request cost: $${cost.toFixed(
+        //     4
+        //   )}, Remaining credits: $${this.credits.toFixed(4)}`
+        // );
+        // this.writeCommandOutput(
+        //   `Request cost: $${cost.toFixed(
+        //     4
+        //   )}. Remaining credits: $${this.credits.toFixed(4)}`
+        // );
+      } else {
+        console.error(`[${this.id}] Usage data not received from the API`);
+        this.writeCommandOutput(
+          "Unable to calculate request cost due to missing usage data."
+        );
+      }
     } catch (error) {
-      console.error("Error querying model:", error);
-      this.writeCommandOutput(
-        "An error occurred while processing your query. Please try again."
-      );
+      console.error(`[${this.id}] Error querying model:`, error);
+      let errorMessage = "Error, use /model to try another model.";
+      if (error instanceof Error) {
+        errorMessage += ` ${error.name}: ${error.message}`;
+        if ("code" in error) {
+          errorMessage += ` (${(error as any).code})`;
+        }
+      }
+      this.writeCommandOutput(`\x1b[31m${errorMessage}\x1b[0m`);
+    }
+  }
+
+  private calculateRequestCost(usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  }): number {
+    console.log(
+      `[${this.id}] Calculating request cost for model: ${this.model}`
+    );
+    const modelPricing = cachedModelList.find(
+      (m) => m.id === this.model
+    )?.pricing;
+    if (!modelPricing) {
+      console.error(`[${this.id}] Pricing not found for model: ${this.model}`);
+      return 0;
+    }
+
+    console.log(`[${this.id}] Model pricing:`, JSON.stringify(modelPricing));
+    const promptCost = parseFloat(modelPricing.prompt) * usage.prompt_tokens;
+    const completionCost =
+      parseFloat(modelPricing.completion) * usage.completion_tokens;
+    const totalCost = (promptCost + completionCost) * PROFIT_RATE;
+
+    console.log(
+      `[${this.id}] Cost breakdown - Prompt: $${promptCost.toFixed(
+        6
+      )}, Completion: $${completionCost.toFixed(
+        6
+      )}, Total (with profit): $${totalCost.toFixed(6)}`
+    );
+    return totalCost;
+  }
+
+  private async updateCredits(): Promise<void> {
+    if (this.username && this.username !== "guest") {
+      await sql`
+        UPDATE accounts
+        SET credits = ${this.credits}
+        WHERE username = ${this.username}
+      `;
+    } else {
+      guestCredits.set(this.clientIP, this.credits);
     }
   }
 
@@ -657,14 +747,16 @@ export class ClientSession implements IClientSession {
         const password_hash = await bcrypt.hash(password, 10);
         const result = await sql`
           INSERT INTO accounts (id, username, credits, password_hash)
-          VALUES (${uuidv4()}, ${username}, 30, ${password_hash})
+          VALUES (${uuidv4()}, ${username}, 0.3, ${password_hash})
           RETURNING id, credits
         `;
         this.userId = result[0].id;
         this.username = username;
         this.credits = result[0].credits;
         this.writeCommandOutput(
-          `Registered successfully. Welcome, ${username}! You have ${this.credits} credits.`
+          `Registered successfully. Welcome, ${username}! You have $${this.credits.toFixed(
+            4
+          )} credits.`
         );
       } catch (error) {
         console.error("Registration error:", error);
@@ -696,7 +788,9 @@ export class ClientSession implements IClientSession {
         this.username = username;
         this.credits = user.credits;
         this.writeCommandOutput(
-          `Logged in successfully. Welcome back, ${username}! You have ${this.credits} credits.`
+          `Logged in successfully. Welcome back, ${username}! You have $${this.credits.toFixed(
+            4
+          )} credits.`
         );
       } catch (error) {
         this.writeCommandOutput(`Login failed. Please try again.`);
@@ -723,6 +817,9 @@ export class ClientSession implements IClientSession {
   async listModels() {
     try {
       const modelList = cachedModelList
+        .sort((a, b) => b.created - a.created)
+        .slice(0, 50)
+        .map((model) => model.id)
         .map((modelId) => {
           const isSelected = modelId === this.model;
           return isSelected
