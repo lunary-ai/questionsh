@@ -546,56 +546,97 @@ export class ClientSession implements IClientSession {
   private async handleInteractiveAuth(mode: "login" | "register") {
     const stream = this.stream;
 
-    // Ask for username without prompt
-    this.writeCommandOutput("Username:", false);
-    stream.write(" "); // Add a space after the colon
+    // Function to validate input
+    const validateInput = (
+      input: string,
+      type: "username" | "password" | "email"
+    ): string | null => {
+      if (input.length < 3) {
+        return `${type} must be at least 3 characters long.`;
+      }
+      if (input.length > 50) {
+        return `${type} must be less than 50 characters long.`;
+      }
+      if (type === "email" && !input.includes("@")) {
+        return "Invalid email format.";
+      }
+      if (type === "username" && !/^[a-zA-Z0-9]+$/.test(input)) {
+        return "Username must contain only alphanumeric characters.";
+      }
+      return null;
+    };
 
-    const username = await new Promise<string>((resolve) => {
-      let input = "";
-      const handler = (data: Buffer) => {
-        const char = data.toString();
-        if (char === "\r") {
-          stream.write("\n");
-          stream.removeListener("data", handler);
-          resolve(input.trim());
-        } else if (char === "\x7f") {
-          // Backspace
-          if (input.length > 0) {
-            input = input.slice(0, -1);
-            stream.write("\b \b");
-          }
-        } else {
-          input += char;
-          stream.write(char);
+    // Function to get input with validation
+    const getInput = async (
+      prompt: string,
+      type: "username" | "password" | "email"
+    ): Promise<string | null> => {
+      while (true) {
+        this.writeCommandOutput(prompt, false);
+        stream.write(" ");
+
+        const input = await new Promise<string | null>((resolve) => {
+          let inputBuffer = "";
+          const handler = (data: Buffer) => {
+            const char = data.toString();
+            if (char === "\x03") {
+              // Ctrl+C
+              stream.write("^C\n");
+              resolve(null);
+            } else if (char === "\r") {
+              stream.write("\n");
+              stream.removeListener("data", handler);
+              resolve(inputBuffer.trim());
+            } else if (char === "\x7f") {
+              // Backspace
+              if (inputBuffer.length > 0) {
+                inputBuffer = inputBuffer.slice(0, -1);
+                stream.write("\b \b");
+              }
+            } else {
+              inputBuffer += char;
+              stream.write(type === "password" ? "*" : char);
+            }
+          };
+          this.inputHandler = handler;
+        });
+
+        if (input === null) {
+          return null; // User pressed Ctrl+C
         }
-      };
-      this.inputHandler = handler;
-    });
 
-    // Ask for password without prompt
-    this.writeCommandOutput("Password:", false);
-    stream.write(" "); // Add a space after the colon
-
-    const password = await new Promise<string>((resolve) => {
-      let input = "";
-      const handler = (data: Buffer) => {
-        const char = data.toString();
-        if (char === "\r") {
-          stream.write("\n");
-          stream.removeListener("data", handler);
-          resolve(input.trim());
-        } else if (char === "\x7f") {
-          // Backspace
-          if (input.length > 0) {
-            input = input.slice(0, -1);
-          }
+        const validationError = validateInput(input, type);
+        if (validationError) {
+          this.writeCommandOutput(validationError);
         } else {
-          input += char;
-          stream.write("*");
+          return input;
         }
-      };
-      this.inputHandler = handler;
-    });
+      }
+    };
+
+    const username = await getInput("Username:", "username");
+    if (username === null) {
+      this.writeCommandOutput("Signup cancelled.");
+      this.resetInputHandler();
+      return;
+    }
+
+    const password = await getInput("Password:", "password");
+    if (password === null) {
+      this.writeCommandOutput("Signup cancelled.");
+      this.resetInputHandler();
+      return;
+    }
+
+    let email: string | null = "";
+    if (mode === "register") {
+      email = await getInput("Email:", "email");
+      if (email === null) {
+        this.writeCommandOutput("Signup cancelled.");
+        this.resetInputHandler();
+        return;
+      }
+    }
 
     this.inputHandler = null; // Clear the handler when done
 
@@ -603,17 +644,17 @@ export class ClientSession implements IClientSession {
     if (mode === "register") {
       try {
         const [existingUser] = await sql`
-          SELECT id FROM accounts WHERE username = ${username}
+          SELECT id FROM accounts WHERE username = ${username} OR email = ${email}
         `;
         if (existingUser) {
-          this.writeCommandOutput(`Username "${username}" is already taken.`);
+          this.writeCommandOutput(`Username or email is already taken.`);
           return;
         }
 
         const password_hash = await bcrypt.hash(password, 10);
         const result = await sql`
-          INSERT INTO accounts (id, username, credits, password_hash)
-          VALUES (${uuidv4()}, ${username}, 0.3, ${password_hash})
+          INSERT INTO accounts (id, username, email, credits, password_hash)
+          VALUES (${uuidv4()}, ${username}, ${email}, 0.3, ${password_hash})
           RETURNING id, credits
         `;
         this.userId = result[0].id;
@@ -662,6 +703,12 @@ export class ClientSession implements IClientSession {
         this.writeCommandOutput(`Login failed. Please try again.`);
       }
     }
+  }
+
+  private resetInputHandler(): void {
+    this.inputHandler = null;
+    this.setInputHandler(); // Re-initialize the input handler
+    this.writeCommandOutput(""); // Write a new prompt
   }
 
   async loadSelectedModel() {
