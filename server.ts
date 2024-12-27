@@ -1,16 +1,9 @@
 import SSH2 from "ssh2";
 import { ClientSession } from "./clientSession";
 import { loadHostKey, generateWelcomeMessage } from "./utils";
-import { sql } from "./database";
 import { AutoLoginInfo } from "./types";
 import http from "http";
-import { openai } from "./index";
-import bcrypt from "bcrypt";
-import {
-  handleAdventure,
-  handleAdventureMessage,
-  handleGameEndChoice,
-} from "./adventureMode";
+import { handleGameEndChoice } from "./adventureMode";
 
 const HOST_KEY_PATH = "./host.key";
 const PORT = Number(process.env.PORT ?? 2222);

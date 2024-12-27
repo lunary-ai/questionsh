@@ -28,7 +28,7 @@ export async function fetchAndCacheModelList() {
 }
 
 // Add a constant for the profit rate
-const PROFIT_RATE = 1.5; // 50% profit
+const PROFIT_RATE = 1.5; // 50% margin
 
 export class ClientSession implements IClientSession {
   id: string;
@@ -51,6 +51,7 @@ export class ClientSession implements IClientSession {
   clientIP: string;
   public inputHandler: ((data: Buffer) => void) | null = null;
   cursorPos: number = 0;
+  gameEndChoice: boolean = false;
   clientPublicKey: string | null = null;
   private inputBuffer: string = "";
 
