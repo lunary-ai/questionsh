@@ -5,6 +5,12 @@ import { sql } from "./database";
 import { AutoLoginInfo } from "./types";
 import http from "http";
 import { openai } from "./index";
+import bcrypt from "bcrypt";
+import {
+  handleAdventure,
+  handleAdventureMessage,
+  handleGameEndChoice,
+} from "./adventureMode";
 
 const HOST_KEY_PATH = "./host.key";
 const PORT = Number(process.env.PORT ?? 2222);
@@ -50,7 +56,6 @@ export function createServer() {
 async function handleClientConnection(client: SSH2.Connection) {
   console.log("Client connected");
   const sessionId = `session_${++sessionCounter}`;
-  let autoLoginUsername: string | null = null;
   const clientIP = client.remoteAddress;
 
   console.log("Client connection from:", clientIP);
@@ -59,26 +64,12 @@ async function handleClientConnection(client: SSH2.Connection) {
     console.log("Authentication attempt:", {
       method: ctx.method,
       username: ctx.username,
+      passwordGiven: ctx.password ? "[hidden]" : "(none)",
       ip: clientIP,
     });
 
-    if (ctx.method === "password" && ctx.username) {
-      try {
-        const result = await sql`
-          SELECT id, credits FROM accounts
-          WHERE username = ${ctx.username}
-        `;
-        if (result.length > 0) {
-          autoLoginUsername = ctx.username;
-          console.log(`Auto-login successful for user: ${ctx.username}`);
-        } else {
-          console.log(`Auto-login failed: User ${ctx.username} not found`);
-        }
-      } catch (error) {
-        console.error("Auto-login error:", error);
-      }
-    }
-    ctx.accept();
+    // Accept all connections as anonymous initially
+    return ctx.accept();
   });
 
   client.on("ready", () => {
@@ -90,7 +81,7 @@ async function handleClientConnection(client: SSH2.Connection) {
       session.on("pty", (accept) => accept());
       session.on("shell", (accept) => {
         const stream = accept();
-        handleStream(stream, sessionId, autoLoginUsername, null, clientIP);
+        handleStream(stream, sessionId, null, clientIP);
       });
     });
   });
@@ -109,52 +100,28 @@ async function handleClientConnection(client: SSH2.Connection) {
 async function handleStream(
   stream: SSH2.ServerChannel,
   sessionId: string,
-  autoLoginUsername: string | null,
-  clientPublicKey: string | null,
+  _unused: null,
   clientIP: string
 ) {
   console.log(`Stream opened for session ${sessionId}`);
   let autoLoginInfo: AutoLoginInfo | null = null;
 
-  if (!autoLoginUsername) {
-    if (!guestCredits.has(clientIP)) {
-      guestCredits.set(clientIP, 0.1);
-    }
-    const credits = guestCredits.get(clientIP) || 0.1;
-    autoLoginInfo = {
-      username: "guest",
-      userId: clientIP,
-      credits,
-    };
-  } else if (autoLoginUsername) {
-    try {
-      const [userInfo] = await sql<[{ id: string; credits: number }]>`
-        SELECT id, credits FROM accounts
-        WHERE username = ${autoLoginUsername}
-      `;
-      if (userInfo) {
-        autoLoginInfo = {
-          username: autoLoginUsername,
-          userId: userInfo.id,
-          credits: userInfo.credits,
-        };
-      }
-    } catch (error) {
-      console.error("Error fetching user info for auto-login:", error);
-    }
+  // Set up anonymous user with guest credits
+  if (!guestCredits.has(clientIP)) {
+    guestCredits.set(clientIP, 0.1);
   }
+  const credits = guestCredits.get(clientIP) || 0.1;
+  autoLoginInfo = {
+    username: "guest",
+    userId: clientIP,
+    credits,
+  };
 
   const session = new ClientSession(sessionId, stream, autoLoginInfo, clientIP);
   sessions.set(sessionId, session);
 
   const welcomeMessage = generateWelcomeMessage(autoLoginInfo);
   session.writeCommandOutput(welcomeMessage);
-
-  if (autoLoginUsername) {
-    session.writeCommandOutput(
-      `Automatically logged in as ${autoLoginUsername}.`
-    );
-  }
 
   stream.on("data", async (data) => {
     // Check if there's a custom input handler (for auth etc)
@@ -224,6 +191,21 @@ async function handleStream(
     if (input === "\r") {
       stream.write("\n");
       const trimmedBuffer = session.buffer.trim();
+
+      // Add this block to handle game end choices
+      if (session.gameEndChoice) {
+        try {
+          await handleGameEndChoice(session, trimmedBuffer);
+          session.buffer = "";
+          session.cursorPos = 0;
+          return;
+        } catch (error) {
+          console.error("Error in game end choice:", error);
+          session.writeCommandOutput("An error occurred. Please try again.");
+          return;
+        }
+      }
+
       if (trimmedBuffer.toLowerCase() === "exit") {
         stream.write("Goodbye! 👋\r\n");
         sessions.delete(sessionId);

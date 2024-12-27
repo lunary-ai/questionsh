@@ -40,10 +40,10 @@ export class ClientSession implements IClientSession {
   model = "anthropic/claude-3.5-haiku:beta";
   systemPrompt =
     "You are a helpful AI assistant accessed through a SSH service called question.sh. Keep responses concise and use simple formatting.";
-  temperature = 1.0;
+  temperature = 0.5;
   userId: string | null = null;
   username: string | null = null;
-  credits = 0.1; // Default credits for unlogged users (in USD)
+  credits = 0.05; // Default credits for unlogged users (in USD)
   stream: Stream;
   currentCharacter: Character | null = null;
   isInAdventure: boolean = false;

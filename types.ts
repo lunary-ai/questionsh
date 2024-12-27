@@ -25,7 +25,7 @@ export interface ClientSession {
   clientIP: string;
   inputHandler: ((data: Buffer) => void) | null;
   cursorPos: number;
-  clientPublicKey: string | null;
+  gameEndChoice?: boolean;
 
   writeToStream(message: string, addPrompt?: boolean): void;
   writeCommandOutput(message: string, addPrompt?: boolean): void;
@@ -45,13 +45,6 @@ export interface AutoLoginInfo {
   userId: string;
   credits: number;
   selected_model: string;
-}
-
-export interface DatabaseMessage {
-  content: string;
-  created_at: Date;
-  is_system_message: boolean;
-  username: string | null;
 }
 
 export interface Account {
