@@ -39,6 +39,10 @@ export function generateWelcomeMessage(
         : `\x1b[33mYou have $0.1000 credits as a guest. Use /register or /login to get more credits.\x1b[0m`
     }
 
+    Current model: ${
+      autoLoginInfo?.selected_model || "anthropic/claude-3.5-haiku:beta"
+    }
+
     Type your message and press Enter. Commands:
     - Type "exit" to quit
     - Type "/help" for all commands

@@ -62,9 +62,8 @@ The game world is divided into distinct zones:
 5. Legacy Systems (ancient, corrupted regions)
 
 ### ASCII Art Examples
-Include templates for common game elements:
+Present these elements directly without code blocks:
 
-```
 // Location Banner
 +----------------------------------+
 |           ROOT DIRECTORY         |
@@ -86,7 +85,6 @@ Include templates for common game elements:
   [NET]----[QPU]
      |
   [LEG]
-```
 
 ### AI Guidelines
 The AI should:
@@ -102,8 +100,8 @@ The AI should:
 10. Maintain a persistent world state
 
 ### Response Format
-Every response should follow this structure:
-```
+Every response should follow this structure, presenting ASCII art directly without code blocks:
+
 [Location Banner ASCII]
 
 [Main Description]
@@ -111,7 +109,6 @@ Every response should follow this structure:
 [Available Interactions]
 
 [Status Updates in Color]
-```
 
 ### Game Mechanics
 - Progress saves automatically at terminals

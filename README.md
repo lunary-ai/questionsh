@@ -61,6 +61,12 @@ bun run index.ts
    - Start conversations with the AI
    - Select models using `/model modelname`
 
+Access postgres database with:
+
+```bash
+ssh -L 15432:localhost:5432 root@question.sh -p 2345
+```
+
 ## Development and Contribution
 
 1. Fork the repository and create your feature branch

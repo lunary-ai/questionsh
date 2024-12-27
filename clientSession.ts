@@ -37,7 +37,7 @@ export class ClientSession implements IClientSession {
   requestCount = 0;
   conversation: Message[] = [];
   startTime = Date.now();
-  model = "google/gemini-2.0-flash-thinking-exp:free";
+  model = "anthropic/claude-3.5-haiku:beta";
   systemPrompt =
     "You are a helpful AI assistant accessed through a SSH service called question.sh. Keep responses concise and use simple formatting.";
   temperature = 1.0;
@@ -653,7 +653,7 @@ export class ClientSession implements IClientSession {
         `;
         this.userId = result[0].id;
         this.username = username;
-        this.credits = result[0].credits;
+        this.credits = Number(result[0].credits);
         this.writeCommandOutput(
           `Registered successfully. Welcome, ${username}! You have $${this.credits.toFixed(
             4
@@ -687,14 +687,17 @@ export class ClientSession implements IClientSession {
 
         this.userId = user.id;
         this.username = username;
-        this.credits = user.credits;
+        this.credits = Number(user.credits);
         this.writeCommandOutput(
           `Logged in successfully. Welcome back, ${username}! You have $${this.credits.toFixed(
             4
           )} credits.`
         );
       } catch (error) {
-        this.writeCommandOutput(`Login failed. Please try again.`);
+        console.error("Login error:", error);
+        this.writeCommandOutput(
+          `Login failed. Error: ${(error as Error).message}`
+        );
       }
     }
   }

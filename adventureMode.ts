@@ -18,7 +18,7 @@ export async function handleAdventure(session: ClientSession, input: string) {
   if (!session.isInAdventure) {
     session.isInAdventure = true;
     session.adventureConversation = [];
-    session.writeCommandOutput("\x1B[2J\x1B[H"); // Clear screen
+    session.writeToStream("\x1B[2J\x1B[H\x1B[3J");
     await handleAdventureMessage(session, "start");
   } else {
     await handleAdventureMessage(session, input);
@@ -30,19 +30,6 @@ export async function handleAdventureMessage(
   message: string
 ) {
   try {
-    if (session.credits <= 0) {
-      session.writeCommandOutput(
-        "You've run out of credits. The adventure ends here."
-      );
-      session.isInAdventure = false;
-      return;
-    }
-
-    session.credits--;
-    if (session.userId) {
-      await sql`UPDATE accounts SET credits = credits - 1 WHERE id = ${session.userId}`;
-    }
-
     session.adventureConversation.push({
       role: "user",
       content: message,
@@ -56,33 +43,91 @@ export async function handleAdventureMessage(
           role: msg.role,
           content: msg.content,
         })),
-        { role: "user", content: message },
       ],
       stream: true,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "save_game",
+            description: "Save the current game progress",
+            parameters: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+        },
+      ],
+      tool_choice: "auto",
     });
 
     let fullResponse = "";
+    let shouldSaveGame = false;
+    let isFirstChunk = true;
+    let buffer = "";
+    let inCodeBlock = false;
+
+    // Clear the current line
+    session.writeToStream("\r\n", false);
 
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || "";
+      const toolCalls = chunk.choices[0]?.delta?.tool_calls;
+
+      if (toolCalls && toolCalls.length > 0) {
+        shouldSaveGame = toolCalls.some(
+          (call) => call.function?.name === "save_game"
+        );
+      }
+
+      if (content) {
+        buffer += content;
+
+        // Check for code block markers
+        if (buffer.includes("```")) {
+          inCodeBlock = !inCodeBlock;
+        }
+
+        // Only process complete lines when we have a newline and we're not in a code block
+        if (buffer.includes("\n") && !inCodeBlock) {
+          const lines = buffer.split("\n");
+          // Keep the last line in the buffer if it doesn't end with a newline
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (isFirstChunk) {
+              isFirstChunk = false;
+            } else {
+              session.writeToStream("\r\n", false);
+            }
+            session.writeToStream("\r" + line, false);
+          }
+        }
+      }
+
       fullResponse += content;
-      session.writeToStream(content, false);
     }
 
-    session.writeToStream("\n");
-    session.adventureConversation.push({ role: "user", content: message });
+    // Flush any remaining buffer
+    if (buffer) {
+      if (!isFirstChunk) {
+        session.writeToStream("\r\n", false);
+      }
+      session.writeToStream("\r" + buffer, false);
+    }
+
     session.adventureConversation.push({
       role: "assistant",
       content: fullResponse.trim(),
     });
 
-    // Save game progress every 5 turns
-    if (session.adventureConversation.length % 10 === 0) {
+    if (shouldSaveGame) {
       await saveGameProgress(session);
+      session.writeToStream("\r\n\x1b[32mGame progress saved!\x1b[0m", false);
     }
 
-    session.writeToStream("\r\n", false);
-    session.writeToStream("> ", false);
+    session.writeToStream("\r\n\x1b[36m>\x1b[0m ", false);
     console.log(
       `Adventure turn completed for user ${session.username || session.id}`
     );

@@ -44,6 +44,7 @@ export interface AutoLoginInfo {
   username: string;
   userId: string;
   credits: number;
+  selected_model: string;
 }
 
 export interface DatabaseMessage {
